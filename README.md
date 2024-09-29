@@ -1,13 +1,117 @@
-# reproduction-of-SBM
-# 【学习笔记】深度生成模型（八）：Score-based Model
+# 【学习笔记】深度生成模型（八）：Fisher散度、Denoising Score Matching和Score-based Model
 
 ## 写在前面
 
-本文是对人大高瓴人工智能学院 李崇轩教授主讲的公开课第六节能量函数模型部分内容的梳理（课程链接[了解Sora背后的原理，你需要学习深度生成模型这门课！ 人大高瓴人工智能学院李崇轩讲授深度生成模型之原理与应用（第1讲）_哔哩哔哩_bilibili](https://link.zhihu.com/?target=https%3A//www.bilibili.com/video/BV1yq421A7ig/%3Fspm_id_from%3D333.337.search-card.all.click%26vd_source%3D196c5d43f645df8f93e712dc5e152b18)）。如有不准确的地方还请大家指出。
+本文是对人大高瓴人工智能学院 李崇轩教授主讲的公开课第七节得分函数模型部分内容的梳理（课程链接[了解Sora背后的原理，你需要学习深度生成模型这门课！ 人大高瓴人工智能学院李崇轩讲授深度生成模型之原理与应用（第1讲）_哔哩哔哩_bilibili](https://link.zhihu.com/?target=https%3A//www.bilibili.com/video/BV1yq421A7ig/%3Fspm_id_from%3D333.337.search-card.all.click%26vd_source%3D196c5d43f645df8f93e712dc5e152b18)）。如有不准确的地方还请大家指出。
+
+本文梳理的是得分函数模型Score-based Model(SBM)，并且将会沿着EBM的likelihood-free的学习方法逐渐过渡到SBM，因此会用到大量EBM中的基础知识，推荐和上一篇一起食用。
+
+回顾一下EBM对似然的定义：
+
+$$\begin{align}
+p_{\theta}(x) &= \frac{\exp(f_{\theta}(x))}{Z_{}(\theta)} \tag{1} \\
+&= \frac{\exp(f_{\theta}(x))}{\int \exp(f_{\theta}(x))dx} \tag{2} \\
+\end{align}$$
+
+在上一篇梳理能量函数模型EBM时，我们已经借Langevin Dynamics(LD)引入了得分函数score function的定义。回顾一下score function和LD：
+
+$$\begin{align}
+s_{\theta}(x) &:= \nabla_x \log p_{\theta}(x) \tag{3} \\
+x_{t+1} &= x_t + \epsilon s_{\theta}(x_t) + \sqrt{2 \epsilon} z_t, z_t \sim \mathcal{N}(0, 1) \tag{4} \\
+\end{align}$$
+
+对于EBM而言，其score function的形式十分简单。将式（1）代入式（3）得到EBM的score function就是神经网络的输出$$f_{\theta}(x)$$对样本$$x$$的梯度：
+
+$$\begin{align}
+s_{\theta}(x) &= \nabla_x f_{\theta}(x)  - \nabla_x \log Z(\theta) = \nabla_x f_{\theta}(x) \tag{5} \\
+\end{align}$$
+
+其中$$Z(\theta)$$关于$$x$$是一个常量，与$$x$$无关。我们可以通过MLE结合LD来驱动EBM的学习，这里面会用到Contrastive Divergence的手段，但问题在于CD对似然函数的梯度的估计是一种有偏的估计，而引入CD的根本原因是EBM的似然是intractable的。
+
+既然对EBM做MLE是存在问题的，且EBM的score function是非常好算的，那么有没有办法从score function出发驱动EBM的学习？答案是我们可以不进行MLE，而是通过最小化Fisher散度的方法实现EBM。
+
+## Fisher Divergence和Denoising Score Matching
+
+Fisher散度是直接从score function出发定义的一个散度：
+
+$$\begin{align}
+D_F(p_{data} \Vert p_{\theta}) = \frac{1}{2}\mathbb{E}_{x \sim p_{data}}[\Vert \nabla_x \log p_{data}(x) - s_{\theta}(x)\Vert_2] \tag{6} \\
+\end{align}$$
+
+Fisher散度就是数据分布$$p_{data}(x)$$和模型分布$$p_{\theta}(x)$$的score function的二范数，再对数据分布$$p_{data}$$取期望。将式（5）代入式（6），得到
+
+$$\begin{align}
+D_F(p_{data}\Vert p_{\theta}) = \frac{1}{2}\mathbb{E}_{x \sim p_{data}}[\Vert \nabla_x \log p_{data}(x) - \nabla_x f_{\theta}(x)\Vert_2] \tag{7} \\
+\end{align}$$
+
+由于取了二范数，因此Fisher散度是大于等于0的，且可以证明的是当$$D_F(p_{data}\Vert p_{\theta})$$等于0时，等价于模型分布$$p_{\theta}(x)$$就等于数据分布$$p_{data}(x)$$。我们令式（6）等于0，则$$f_{\theta}(x)$$和$$\log p_{data}(x)$$在函数空间上梯度处处相等，则它们最多相差一个常数$$C$$：
+
+$$\begin{align}
+f_{\theta}(x) = \log p_{data}(x) +C \tag{8} \\
+\end{align}$$
+
+将式（8）代入EBM建模的概率分布式（2）：
+
+$$\begin{align}
+p_{\theta}(x) &= \frac{\exp(f_{\theta}(x))}{\int \exp(f_{\theta}(x))dx} \tag{9} \\
+&= \frac{\exp(\log p_{data}(x) +C)}{\int \exp(\log p_{data}(x) +C) dx} \tag{10} \\
+&= \frac{\exp(C)\exp(\log p_{data}(x))}{\exp(C)\int \exp(\log p_{data}(x)) dx} \tag{11} \\
+&= \frac{p_{data}(x)}{\int  p_{data}(x) dx} \tag{12} \\
+&= p_{data}(x) \\
+\end{align}$$
+
+因此当$$D_F(p_{data}\Vert p_{\theta})$$等于0时，EBM的模型分布就等于数据分布。所以我们可以不做MLE，转而通过最小化Fisher散度来更新EBM，这样的方法称为Score Matching：
+
+$$\begin{align}
+\min_{\theta} D_F(p_{data}\Vert p_{\theta}) = \frac{1}{2}\mathbb{E}_{x \sim p_{data}}[\Vert \nabla_x \log p_{data}(x) - \nabla_x f_{\theta}(x)\Vert_2] \tag{13} \\
+\end{align}$$
+
+式（13）实际上还是没法直接用，原因在于数据分布的score function是未知的，好在Fisher散度可以写成不带$$\nabla_x \log p_{data}(x)$$的形式：
+
+$$\begin{align}
+\min_{\theta} D_F(p_{data}, p_{\theta}) &= \mathbb{E}_{x \sim p_{data}}[\frac{1}{2}\Vert \nabla_x f_{\theta}(x)\Vert_2 + tr(\nabla_x^{2}f_{\theta}(x))] \tag{14} \\
+&= \frac{1}{n} \sum_{i=1}^n [\frac{1}{2}\Vert \nabla_x f_{\theta}(x_i)\Vert_2 + tr(\nabla_x^{2}f_{\theta}(x_i))] \tag{15} \\
+\end{align}$$
+
+式（14）到式（15）是使用了蒙特卡罗估计。通过最小化式（15）来驱动EBM更新，然后在训练完成以后再通过郎之万动力学采样，是EBM的一种likelihood-free的学习方法。和基于CD的学习方法相比，score matching不需要在每个训练轮次都多次采样，但不足之处是$$f_{\theta}(x_i)$$的二阶导也就是hessian矩阵的计算也是复杂度比较高的，从这个角度来说score matching是很难scale up的。
+
+为了能使Score Matching的计算效率进一步提升，Vincent提出了Denoising Score Matching(DSM)。DSM提出，如果我们往$$x$$中加高斯噪声$$z \sim \mathcal{N}(0, \mathbb{I})$$，得到$$\tilde{x} = x + \sigma z$$，则加噪后的$$\tilde{x}$$的真实分布$$q(\tilde{x})$$和模型分布$$p_{\theta}(\tilde{x})$$之间的Fisher散度等价于：
+
+$$\begin{align}
+\min_{\theta} D_F(q, p_{\theta}) &= \mathbb{E}_{\tilde{x} \sim q(\tilde{x})}[\frac{1}{2}\Vert s_{\theta}(\tilde{x}) - \nabla_{\tilde{x}} \log q(\tilde{x}) \Vert_2]  \tag{16} \\
+&= \mathbb{E}_{x \sim p_{data}, \tilde{x} \sim q(\tilde{x}|x)}[\frac{1}{2}\Vert s_{\theta}(\tilde{x}) - \nabla_{\tilde{x}} \log q(\tilde{x}|x) \Vert_2] + \C  \tag{17} \\
+\end{align}$$
+
+其中，$$\C$$是常量，我们在后面将省略；$$q(\tilde{x}|x)$$表示加噪后的变量$$\tilde{x}$$关于$$x$$的条件分布，且由于$$\tilde{x} = x + \sigma z$$，在给定$$x$$的条件下$$q(\tilde{x}|x) \sim \mathcal{N}(x, \sigma^2 \mathbb{I})$$，因此我们可以写出这个条件分布的概率密度函数：
+
+$$\begin{align}
+q(\tilde{x}|x) = \frac{1}{\sqrt{2\pi}\sigma}\exp(-\frac{(\tilde{x} - x)^2}{2\sigma^2}) \tag{18} \\
+\end{align}$$
+
+将式（18）代入式（17），得到：
+
+$$\begin{align}
+\min_{\theta} D_F(q, p_{\theta}) &= \mathbb{E}_{x \sim p_{data}, \tilde{x} \sim q(\tilde{x}|x)}[\frac{1}{2}\Vert s_{\theta}(\tilde{x}) - \nabla_{\tilde{x}} \log q(\tilde{x}|x) \Vert_2]  \tag{19} \\
+&= \mathbb{E}_{x \sim p_{data}, \tilde{x} \sim q(\tilde{x}|x)}[\frac{1}{2}\Vert s_{\theta}(\tilde{x}) - \nabla_{\tilde{x}} \log \frac{1}{\sqrt{2\pi}\sigma}\exp(-\frac{(\tilde{x} - x)^2}{2\sigma^2}) \Vert_2]  \tag{20} \\
+&= \mathbb{E}_{x \sim p_{data}, \tilde{x} \sim q(\tilde{x}|x)}[\frac{1}{2}\Vert s_{\theta}(\tilde{x}) + \frac{\tilde{x} - x}{\sigma^2}  \Vert_2]  \tag{21} \\
+&= \mathbb{E}_{x \sim p_{data}, z \sim \mathcal{N(0, \mathbb{I})}}[\frac{1}{2}\Vert s_{\theta}(x + \sigma z) + \frac{z}{\sigma}  \Vert_2]  \tag{22} \\
+\end{align}$$
+
+式（22）就是DSM的目标函数。我们从直觉上理解一下式（22）。我们知道score function指向的是使得样本的概率密度最大的方向，那么对于一个加噪的样本$$\tilde{x}$$，它的概率密度增长最大的方向就应该是去噪的方向，这个方向就是$$-\frac{\tilde{x} - x}{\sigma^2}$$，所以式（22）是希望神经网络尽可能地预测去噪的方向。值得一提的是，这里和diffusion model里预测噪声的目标是非常相似的，但不同之处在于这里预测的不是噪声$$z$$，而是去噪的方向。
+
+DSM绕开了hessian矩阵的计算，但代价是通过DSM估计得到的分布并不是原始数据的分布$$p_{data}$$，而是先对原始数据加了一次噪声，然后估计带噪分布$$q$$。只有在噪声的方差足够小的情况下（$$\sigma$$足够小），才可以认为$$q \approx p_{data}$$。
+
+到这里，我们回顾一下likelihood-free的EBM训练方法，我们需要的是score function（式22）；在EBM训练完以后，我们依然要通过LD采样，需要的也是score function（式4）。既然我们在学习和采样过程中，都只需要score function，那可不可以抛开概率密度函数$$p_{\theta}(x)$$和normalizing constant $$Z(\theta)$$，抛开能量函数$$f_{\theta}(x)$$，直接用神经网络对$$s_{\theta}$$建模？这就是SBM的motivation。
+
+## Score-based Model
+
+梯度场和概率密度函数$$p_{\theta}(x)$$是一体两面的，因为梯度指向的是使得当前输入的概率密度最大的方向。 得分函数模型Score-based Model
 
 ![image-20240927145903976](C:\Users\l00850616\AppData\Roaming\Typora\typora-user-images\image-20240927145903976.png)
 
 既然EBM推导到最后，我们用score matching的方法能够进行优化，且score matching和采样都只用到了score function而与normalizing constant $$Z$$无关了，那么我们能不能抛弃概率密度或者似然，直接定义score function来学习一个生成模型？这就是score-based model的motivation。
+
+
 
 ## 网络架构
 
