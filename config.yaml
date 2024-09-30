@@ -1,0 +1,8 @@
+batch_size: 256
+learning_rate: 0.01
+num_epochs: 100
+image_size: 28
+ckpt_path: './ckpt'
+visualization_path: './visualization'
+log_path: './logs'
+input_dim: 1
