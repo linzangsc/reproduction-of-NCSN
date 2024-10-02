@@ -1,6 +1,18 @@
 import torch
 import torch.nn as nn
     
+class ConditionalInstanceNorm2d(nn.Module):
+    def __init__(self, hidden_dim, num_embedding=10):
+        super(ConditionalInstanceNorm2d, self).__init__()
+        self.instance_norm = nn.InstanceNorm2d(hidden_dim)
+        self.time_embedding = nn.Embedding(num_embedding, hidden_dim)
+    
+    def forward(self, x, t):
+        out = self.instance_norm(x)
+        gamma = self.time_embedding(t)
+        out = gamma*out
+        return out
+
 class LowBlock(nn.Module):
     def __init__(self, input_dim, hidden_dim):
         super(LowBlock, self).__init__()
@@ -37,8 +49,9 @@ class ScoreBasedModel(nn.Module):
         super(ScoreBasedModel, self).__init__()
         self.device = device
         self.denoise_step = denoise_step
+        self.time_embedding = nn.Embedding(denoise_step, 28*28)
         self.input_layer = nn.Sequential(
-            nn.Conv2d(input_dim, hidden_dim, kernel_size=3, padding=3),
+            nn.Conv2d(input_dim*2, hidden_dim, kernel_size=3, padding=3),
             nn.InstanceNorm2d(hidden_dim),
             nn.ReLU(),
         )
@@ -64,8 +77,11 @@ class ScoreBasedModel(nn.Module):
             nn.Conv2d(hidden_dim, output_dim, kernel_size=5),
         )
     
-    def forward(self, x):
+    def forward(self, x, t):
         # shape of x: (B, C, H, W)
+        # time embedding
+        t = self.time_embedding(t).reshape(x.shape)
+        x = torch.cat([x, t], dim=1)
         # downsample
         x = self.input_layer(x)
         x1 = self.downlayer_1(x)
@@ -86,16 +102,12 @@ class ScoreBasedModel(nn.Module):
         out = self.output_layer(x7)
         return out
 
-    def sample_by_langevin(self, init_x, max_step=100, epsilon=10):
+    def sample_by_langevin(self, init_x, t, max_step=100, step_size=2e-5):
         x = init_x
-        x.requires_grad = True
         noise = torch.randn_like(x)
         for i in range(max_step):
             noise.normal_(0, 0.005)
-            energy = self.net(x).sum()
-            grad = torch.autograd.grad(outputs=energy, inputs=x)[0]
-            grad.clamp_(-0.03, 0.03)
-            # if grad.max() > 10: print(f"grad: {grad.max()}")
-            x = x + epsilon*grad + torch.sqrt(torch.tensor(2.*epsilon))*noise
+            score = self(x, t)
+            x = x + 0.5*step_size*score + torch.sqrt(torch.tensor(step_size))*noise
             x = x.clip(-1., 1.)
         return x.detach()

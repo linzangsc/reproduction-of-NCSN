@@ -12,9 +12,9 @@ class CustomizedDataset:
             transforms.Normalize((0.5,), (0.5,))
         ])
 
-        self.train_dataset = datasets.MNIST(root='../dataset', train=True, 
+        self.train_dataset = datasets.MNIST(root='../data', train=True, 
                                             download=True, transform=self.transform)
-        self.test_dataset = datasets.MNIST(root='../dataset', train=False, 
+        self.test_dataset = datasets.MNIST(root='../data', train=False, 
                                            download=True, transform=self.transform)
 
 def visualize_float_result(image, axs):
@@ -47,20 +47,19 @@ class NoiseScheduler:
         super().__init__()
         self.device = device
         self.noise_step = noise_step
-        self.noise_std = np.linspace(min_std, max_std, num=noise_step).tolist()
+        self.noise_std = np.exp(np.linspace(np.log(min_std), 
+                                            np.log(max_std), 
+                                            num=noise_step), dtype=np.float32)
 
     def add_noise(self, x):
-        noise = torch.rand_like(x).to(self.device)
-        all_noise_list = []
-        all_noised_x_list = []
-        for step in range(self.noise_step):
-            noise.normal_(0, 1)
-            all_noise_list.append(noise.clone())
-            x.data.add_(noise.data*self.noise_std[step])
-            all_noised_x_list.append(x.clone())
-        noised_x = torch.cat(all_noised_x_list, dim=0)
-        all_noise = torch.cat(all_noise_list, dim=0)
-        return noised_x, all_noise
+        batch_size = x.shape[0]
+        noise = torch.randn_like(x).to(self.device)
+        t = np.random.randint(0, self.noise_step, batch_size)
+        sigma = self.noise_std[t]
+        sigma = torch.from_numpy(sigma).to(self.device).view(-1, 1, 1, 1)
+        noised_x = x + noise*sigma
+        t = torch.tensor(t, dtype=torch.int32).to(self.device)
+        return noised_x, sigma, t
 
 class Sampler:
 

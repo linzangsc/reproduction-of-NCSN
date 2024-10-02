@@ -22,7 +22,7 @@ class Trainer:
         self.train_dataset = self.dataset.train_dataset
         self.test_dataset = self.dataset.test_dataset
         self.train_loader = torch.utils.data.DataLoader(dataset=self.train_dataset, 
-                                                        batch_size=self.batch_size, shuffle=True)
+                                                        batch_size=self.batch_size, shuffle=True, drop_last=True)
         self.test_loader = torch.utils.data.DataLoader(dataset=self.test_dataset, 
                                                        batch_size=self.batch_size, shuffle=False)
         self.model = ScoreBasedModel(input_dim=config['input_dim'], output_dim=config['input_dim'],
@@ -30,41 +30,43 @@ class Trainer:
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['learning_rate'], betas=(0.0, 0.999))
         self.noise_scheduler = NoiseScheduler(self.device)
 
-    def loss(self, score, all_noise):
-        loss = 0.
-        for i in range(self.noise_scheduler.noise_step):
-            cur_score = score[i*self.batch_size:(i+1)*self.batch_size]
-            cur_noise = all_noise[i*self.batch_size:(i+1)*self.batch_size]
-            cur_std = self.noise_scheduler.noise_std[i]
-            cur_lambda = cur_std**2
-            cur_loss = 0.5*((cur_score + cur_noise/cur_std)**2).mean()
-            loss += cur_lambda * cur_loss
-        loss = loss / self.noise_scheduler.noise_step
-        return loss
+    def loss(self, score, noised_x, images, sigma):
+        # shape of inputs: (N, C, H, W)
+        target = -1. / sigma**2 * (noised_x - images)
+        loss = 0.5*((score - target)**2).sum(dim=(1,2,3)) * sigma.squeeze()**2
+        return loss.mean()
 
     def train(self):
         self.model.train()
         for epoch in range(self.num_epochs):
-            for i, (images, labels) in enumerate(self.train_loader):
+            for i, (images, _) in enumerate(self.train_loader):
                 # translate to binary images
                 images = images.to(self.device)
-                labels = labels.to(self.device)
                 self.optimizer.zero_grad()
-                all_noised_x, all_noise = self.noise_scheduler.add_noise(images)
-                score = self.model(all_noised_x)
-                loss = self.loss(score, all_noise)
+                noised_x, sigma, t = self.noise_scheduler.add_noise(images)
+                score = self.model(noised_x, t)
+                loss = self.loss(score, noised_x, images, sigma)
                 loss.backward()
                 self.optimizer.step()
                 if i % 1 == 0:
                     print(f'Epoch [{epoch+1}/{self.num_epochs}], Step [{i+1}/{len(self.train_loader)}], loss: {loss.item():.6f}')
-                
-            self.save_model(self.config['ckpt_path'])
+                self.logger.add_scalar('loss/train', loss.item(), i + epoch * len(self.train_loader))
 
-            # z = torch.rand((16, 1, self.image_size, self.image_size)).to(self.device)
-            # z = z * 2 - 1
-            # sample_image = self.sampler.generate_samples(self.model, z, steps=256, step_size=10)
-            # sample_image = sample_image.reshape(16, 1, self.image_size, self.image_size)
-            # self.visualize_samples(sample_image, epoch)
+            self.save_model(self.config['ckpt_path'])
+            with torch.no_grad():
+                z = torch.rand((16, 1, self.image_size, self.image_size)).to(self.device)
+                z = z * 2 - 1
+                self.sample(z, epoch)
+
+    def sample(self, z, epoch=-1, epsilon=2e-5):
+        std_L = self.noise_scheduler.noise_std[0]
+        x = z
+        for i in range(self.noise_scheduler.noise_step-1, -1, -1):
+            t = torch.ones((x.shape[0]), dtype=torch.int32).to(self.device) * i
+            cur_std = self.noise_scheduler.noise_std[i]
+            step_size = epsilon * cur_std**2/std_L**2
+            x = self.model.sample_by_langevin(x, t, max_step=100, step_size=step_size)
+        self.visualize_samples(x, epoch)
 
     def save_model(self, output_path):
         if not os.path.exists(output_path): os.mkdir(output_path)
