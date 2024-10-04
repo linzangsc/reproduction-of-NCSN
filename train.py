@@ -58,7 +58,7 @@ class Trainer:
             self.save_model(self.config['ckpt_path'])
             with torch.no_grad():
                 z = torch.rand((16, 1, self.image_size, self.image_size)).to(self.device)
-                z = 2.*z - 1.
+                # z = 2.*z - 1.
                 self.sample(z, epoch)
 
     def sample(self, z, epoch=-1, epsilon=2e-5):

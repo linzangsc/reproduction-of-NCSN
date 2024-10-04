@@ -9,7 +9,7 @@ class CustomizedDataset:
     def __init__(self) -> None:
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.5,), (0.5,))
+            # transforms.Normalize((0.5,), (0.5,))
         ])
 
         self.train_dataset = datasets.MNIST(root='../data', train=True, 
