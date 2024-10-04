@@ -14,5 +14,6 @@ Some samples on MNIST after 50 epochs:
 
 Loss trend:
 
-![image](https://github.com/user-attachments/assets/b02dd5ae-47af-4cf8-b444-9c46bae03933)
+![image](https://github.com/user-attachments/assets/ad3e6113-fb1a-4201-a2d5-ba51aae76ed6)
+
 
