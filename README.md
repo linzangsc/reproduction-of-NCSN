@@ -6,7 +6,7 @@ Official repo: https://github.com/ermongroup/ncsn
 
 Usage: python train.py
 
-Implementation details: Use naive U-Net composed of convolutions and IN instead of the refineNet archetecture from original paper, which turns out that the convergence speed will be slow than official release and only tested valid on MNIST
+Implementation details: Use naive U-Net composed of convolutions and IN instead of the refineNet archetecture from original paper, which turns out that the convergence will be slower than official release
 
 Some samples on MNIST after 50 epochs:
 
