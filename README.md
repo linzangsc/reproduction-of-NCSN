@@ -1,4 +1,4 @@
-A simple reproduction of NCSN (Noise Conditional Score Networks)
+A simple reproduction of score-based model NCSN (Noise Conditional Score Networks)
 
 Original paper: https://proceedings.neurips.cc/paper_files/paper/2019/file/3001ef257407d5a371a96dcd947c7d93-Paper.pdf
 
