@@ -1,5 +1,6 @@
 import os
 import yaml
+import tqdm
 import torch
 import numpy as np
 import torch.nn as nn
@@ -7,7 +8,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from utils import CustomizedDataset, visualize_float_result, visualize_latent_space, NoiseScheduler
-from model import ScoreBasedModel
+# from model import ScoreBasedModel
+from models.cond_refinenet_dilated import CondRefineNetDilated as ScoreBasedModel
 from torch.utils.tensorboard import SummaryWriter
 
 class Trainer:
@@ -27,7 +29,7 @@ class Trainer:
                                                        batch_size=self.batch_size, shuffle=False)
         self.model = ScoreBasedModel(input_dim=config['input_dim'], output_dim=config['input_dim'],
                                      device=self.device).to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config['learning_rate'], betas=(0.0, 0.999))
+        self.optimizer = optim.Adam(self.model.parameters(), lr=config['learning_rate'], betas=(0.9, 0.999))
         self.noise_scheduler = NoiseScheduler(self.device)
 
     def loss(self, score, noised_x, images, sigma):
@@ -40,7 +42,8 @@ class Trainer:
         self.model.train()
         for epoch in range(self.num_epochs):
             for i, (images, _) in enumerate(self.train_loader):
-                # translate to binary images
+                # from discrete to continuous for score modeling
+                images = images/256.*255. + torch.rand_like(images)/256.
                 images = images.to(self.device)
                 self.optimizer.zero_grad()
                 noised_x, sigma, t = self.noise_scheduler.add_noise(images)
@@ -55,7 +58,7 @@ class Trainer:
             self.save_model(self.config['ckpt_path'])
             with torch.no_grad():
                 z = torch.rand((16, 1, self.image_size, self.image_size)).to(self.device)
-                z = z * 2 - 1
+                z = 2.*z - 1.
                 self.sample(z, epoch)
 
     def sample(self, z, epoch=-1, epsilon=2e-5):
